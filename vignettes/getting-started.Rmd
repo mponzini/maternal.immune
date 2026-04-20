@@ -1,0 +1,210 @@
+---
+title: "Getting Started with PLS-DA Analysis"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with PLS-DA Analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Introduction
+
+This vignette demonstrates how to use the `maternal.immune` package to perform Partial Least Squares Discriminant Analysis (PLS-DA) on cytokine data to predict maternal immune status.
+
+## Load the Package
+
+```{r setup}
+library(maternal.immune)
+library(ggplot2)
+```
+
+## Example Data
+
+For this example, we'll create simulated cytokine data with two groups representing different maternal immune status levels.
+
+```{r create-data}
+set.seed(42)
+
+# Simulate cytokine measurements for 100 samples
+n_samples <- 100
+n_cytokines <- 15
+
+# Create outcome variable (maternal immune status)
+immune_status <- factor(rep(c("yes", "no"), each = n_samples / 2))
+
+# Simulate cytokine data with some group differences
+cytokines <- matrix(rnorm(n_samples * n_cytokines),
+                    nrow = n_samples,
+                    ncol = n_cytokines)
+
+# Add some discriminatory signal to certain cytokines
+# Cytokines 1-5 will have higher values in "yes" group
+for (i in 1:5) {
+  cytokines[immune_status == "yes", i] <-
+    cytokines[immune_status == "yes", i] + rnorm(n_samples/2, mean = 1.5, sd = 0.5)
+}
+
+# Cytokines 6-8 will have lower values in "yes" group
+for (i in 6:8) {
+  cytokines[immune_status == "yes", i] <-
+    cytokines[immune_status == "yes", i] - rnorm(n_samples/2, mean = 1, sd = 0.5)
+}
+
+# Name the cytokines
+colnames(cytokines) <- paste0("IL", 1:n_cytokines)
+
+# Display dimensions
+cat("Data dimensions:\n")
+cat("  Samples:", nrow(cytokines), "\n")
+cat("  Cytokines:", ncol(cytokines), "\n")
+cat("  Outcome classes:", table(immune_status), "\n")
+```
+
+## Step 1: Validate the Data
+
+Before running the analysis, it's good practice to validate the input data.
+
+```{r validate}
+# Validate the data
+validate_plsda_data(cytokines, immune_status)
+```
+
+## Step 2: Prepare the Data
+
+The `prepare_plsda_data()` function helps preprocess the data by:
+- Removing zero-variance predictors
+- Handling missing values
+- Optionally applying transformations
+
+```{r prepare}
+prepared <- prepare_plsda_data(
+  X = cytokines,
+  Y = immune_status,
+  remove_zero_var = TRUE,
+  na_action = "fail",  # We have no missing data in this example
+  log_transform = FALSE,
+  verbose = TRUE
+)
+```
+
+## Step 3: Run PLS-DA Analysis
+
+Now we can run the PLS-DA model using 2 components.
+
+```{r run-plsda}
+result <- run_plsda(
+  X = prepared$X,
+  Y = prepared$Y,
+  ncomp = 2,
+  scale = TRUE
+)
+
+# Print summary
+print(result)
+```
+
+## Step 4: Examine VIP Scores
+
+Variable Importance Projection (VIP) scores help identify which cytokines are most important for discriminating between groups. Generally, VIP > 1 indicates an important variable.
+
+```{r vip-scores}
+# View top 10 VIP scores
+head(result$vip_scores, 10)
+
+# Identify important cytokines (VIP > 1)
+important_cytokines <- result$vip_scores[result$vip_scores$vip_score > 1, ]
+cat("\nNumber of important cytokines (VIP > 1):", nrow(important_cytokines), "\n")
+print(important_cytokines)
+```
+
+## Step 5: Visualize VIP Scores
+
+Create a bar plot of the VIP scores to visualize which cytokines are most discriminatory.
+
+```{r plot-vip, fig.width=8, fig.height=6}
+# Plot top 15 cytokines
+vip_plot <- plot_vip(
+  result$vip_scores,
+  top_n = 15,
+  threshold = 1.0,
+  title = "Cytokine Importance for Maternal Immune Status"
+)
+
+print(vip_plot)
+```
+
+## Step 6: Access the mixOmics Model
+
+The underlying mixOmics model can be accessed for additional analyses.
+
+```{r mixomics-plots, eval=FALSE}
+# Score plot (sample plot)
+mixOmics::plotIndiv(
+  result$model,
+  comp = c(1, 2),
+  group = result$Y,
+  legend = TRUE,
+  title = "PLS-DA Sample Plot"
+)
+
+# Loading plot (variable plot)
+mixOmics::plotLoadings(
+  result$model,
+  comp = 1,
+  title = "Loadings on Component 1"
+)
+```
+
+## Step 7: Model Performance Assessment
+
+You can assess model performance using cross-validation.
+
+```{r performance, eval=FALSE}
+# Perform cross-validation
+cv_result <- mixOmics::perf(
+  result$model,
+  validation = "Mfold",
+  folds = 5,
+  nrepeat = 10,
+  progressBar = FALSE
+)
+
+# View performance metrics
+plot(cv_result)
+```
+
+## Interpretation
+
+### VIP Scores
+
+In this example:
+- Cytokines with VIP > 1 are considered important predictors
+- The top-ranked cytokines (IL1-IL5 in our simulation) show the strongest discriminatory power
+- These cytokines should be prioritized for further biological investigation
+
+### Practical Recommendations
+
+1. **VIP Threshold**: While VIP > 1 is commonly used, you may adjust this threshold based on your specific needs
+2. **Component Selection**: Use cross-validation to determine the optimal number of components
+3. **Data Scaling**: Scaling is recommended when cytokines are measured on different scales
+4. **Sample Size**: Ensure adequate samples per class (minimum 10-15 recommended)
+
+## Summary
+
+This vignette demonstrated:
+1. Data preparation and validation
+2. Running PLS-DA analysis
+3. Calculating and interpreting VIP scores
+4. Visualizing important cytokines
+5. Accessing the underlying model for advanced analyses
+
+For more information on PLS-DA methodology, see the [mixOmics documentation](http://mixomics.org/).
